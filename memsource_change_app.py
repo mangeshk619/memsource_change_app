@@ -9,11 +9,11 @@ HEADERS = {"Authorization": f"ApiToken {API_TOKEN}"}
 
 # 🔎 Function to test API connection
 def test_api_connection():
-    url = f"{BASE_URL}/users/me"
-    response = requests.get(url, headers=HEADERS)
+    url = f"{BASE_URL}/projects"
+    response = requests.get(url, headers=HEADERS, params={"pageSize": 1})
     if response.status_code == 200:
-        user = response.json()
-        st.success(f"✅ Connected to Memsource as: {user.get('userName')}")
+        data = response.json()
+        st.success(f"✅ Connected to Memsource. Found {data.get('totalElements', 0)} projects.")
         return True
     else:
         st.error(f"❌ Connection failed: {response.status_code} - {response.text}")
