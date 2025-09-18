@@ -1,46 +1,25 @@
 import streamlit as st
 import xml.etree.ElementTree as ET
+import re
+from rapidfuzz import fuzz
 
 # ------------------------------
-# Levenshtein distance helpers
+# Helper functions
 # ------------------------------
-def levenshtein(a, b):
-    """Compute Levenshtein distance between two strings."""
-    if len(a) < len(b):
-        return levenshtein(b, a)
-    if len(b) == 0:
-        return len(a)
 
-    prev_row = range(len(b) + 1)
-    for i, c1 in enumerate(a):
-        curr_row = [i + 1]
-        for j, c2 in enumerate(b):
-            insertions = prev_row[j + 1] + 1
-            deletions = curr_row[j] + 1
-            substitutions = prev_row[j] + (c1 != c2)
-            curr_row.append(min(insertions, deletions, substitutions))
-        prev_row = curr_row
-    return prev_row[-1]
-
-
-def calculate_change_percent(mt_texts, pe_texts):
-    """Compute average change % between MT and PE texts."""
-    total_distance = 0
-    total_length = 0
-
-    for mt, pe in zip(mt_texts, pe_texts):
-        distance = levenshtein(mt, pe)
-        total_distance += distance
-        total_length += max(len(mt), len(pe))
-
-    if total_length == 0:
-        return 0.0
-
-    return (total_distance / total_length) * 100
+def clean_text(text):
+    """Remove placeholders/tags and normalize whitespace."""
+    if not text:
+        return ""
+    # Remove inline tags like <ph id="1"/>, <x id="1"/>
+    text = re.sub(r"<[^>]+>", "", text)
+    # Normalize whitespace
+    text = " ".join(text.split())
+    return text
 
 
 def parse_xliff(uploaded_file):
-    """Extract <source> and <target> segments from XLIFF/MXLIFF."""
+    """Extract and clean <source> and <target> segments from XLIFF/MXLIFF."""
     try:
         tree = ET.parse(uploaded_file)
         root = tree.getroot()
@@ -51,12 +30,27 @@ def parse_xliff(uploaded_file):
             source = unit.find("x:source", ns)
             target = unit.find("x:target", ns)
             if source is not None and target is not None:
-                sources.append(source.text or "")
-                targets.append(target.text or "")
+                sources.append(clean_text(source.text))
+                targets.append(clean_text(target.text))
         return sources, targets
     except Exception as e:
         st.error(f"❌ Failed to parse XLIFF: {e}")
         return [], []
+
+
+def calculate_change_percent_rapidfuzz(mt_texts, pe_texts):
+    """Compute Change % using RapidFuzz similarity."""
+    if not mt_texts or not pe_texts or len(mt_texts) != len(pe_texts):
+        return 0.0
+
+    total_similarity = 0
+    for mt, pe in zip(mt_texts, pe_texts):
+        score = fuzz.ratio(mt, pe)  # 0-100 similarity
+        total_similarity += score
+
+    avg_similarity = total_similarity / len(mt_texts)
+    change_percent = 100 - avg_similarity
+    return change_percent
 
 
 # ------------------------------
@@ -78,7 +72,7 @@ if project_uid:
     if uploaded_file:
         sources, targets = parse_xliff(uploaded_file)
         if sources and targets:
-            change_percent = calculate_change_percent(sources, targets)
+            change_percent = calculate_change_percent_rapidfuzz(sources, targets)
             st.success(f"✅ Change Percentage for project `{project_uid}`: {change_percent:.2f}%")
         else:
             st.warning("⚠️ No translatable segments found in the XLIFF.")
