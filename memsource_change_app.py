@@ -17,7 +17,7 @@ def get_headers():
     if not API_TOKEN:
         st.error("❌ No API token found. Please add MEMSOURCE_API_TOKEN in Streamlit secrets.")
         return None
-    return {"Authorization": f"Bearer {API_TOKEN}"}
+    return {"Authorization": f"ApiToken {API_TOKEN}"}
 
 
 def list_projects(page_size=20):
