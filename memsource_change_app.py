@@ -1,119 +1,83 @@
 import streamlit as st
 import requests
-import zipfile
-from io import BytesIO
 import xml.etree.ElementTree as ET
-import Levenshtein
+from io import BytesIO
 
-# -----------------------------
-# Memsource API Configuration
-# -----------------------------
-API_TOKEN = 'SWY3OEhkSjJOYi9IRVhKTU5QZFVVd2dmT1kvR0tpZ0w2K29TVkt0NjhqQT06d1I5M2JTSDZnb000WktvZXVSejlCQzoxeWVVdmtmajA1cVRtYVA2OTVISWln'
-BASE_URL = 'https://cloud.memsource.com/web/api2/v1'
-HEADERS = {'Authorization': f'ApiToken {API_TOKEN}'}
+BASE_URL = "https://cloud.memsource.com/web/api2"
+API_TOKEN = st.secrets["memsource"]["api_token"]  # store your token in Streamlit secrets
+HEADERS = {"Authorization": f"ApiToken {API_TOKEN}"}
 
-# -----------------------------
-# Functions
-# -----------------------------
-def list_projects():
-    url = f'{BASE_URL}/projects'
+# 🔎 Function to test API connection
+def test_api_connection():
+    url = f"{BASE_URL}/users/me"
     response = requests.get(url, headers=HEADERS)
-    response.raise_for_status()
-    projects = response.json()
-    return [(p['id'], p['name']) for p in projects]
-
-def list_jobs(project_id):
-    url = f'{BASE_URL}/projects/{project_id}/jobs'
-    response = requests.get(url, headers=HEADERS)
-    response.raise_for_status()
-    jobs = response.json()
-    return [(job['id'], job['name']) for job in jobs]
-
-def download_mt_file_from_job(job_id):
-    url = f'{BASE_URL}/jobs/{job_id}/files'
-    response = requests.get(url, headers=HEADERS)
-    response.raise_for_status()
-    files_data = response.json()
-
-    for f in files_data:
-        if 'MT' in f['fileName'].upper():
-            r = requests.get(f['downloadUrl'])
-            r.raise_for_status()
-            return r.content
-    st.warning("No MT file found in this job.")
-    return None
-
-def read_xliff_content(file_bytes):
-    try:
-        if file_bytes[:4] == b'PK\x03\x04':
-            z = zipfile.ZipFile(BytesIO(file_bytes))
-            text_segments = []
-            for name in z.namelist():
-                if name.endswith(('.xlf', '.xliff')):
-                    with z.open(name) as f:
-                        text_segments.append(read_xlf(f))
-            return '\n'.join(text_segments)
-        else:
-            return read_xlf(BytesIO(file_bytes))
-    except Exception as e:
-        st.error(f'Error reading file: {e}')
-        return ''
-
-def read_xlf(f):
-    tree = ET.parse(f)
-    root = tree.getroot()
-    ns = {"xliff": "urn:oasis:names:tc:xliff:document:1.2"}
-    text_segments = []
-    for elem in root.findall('.//xliff:target', ns):
-        text_segments.append(elem.text or '')
-    return '\n'.join(text_segments)
-
-def calculate_change_percent(original_text, edited_text):
-    distance = Levenshtein.distance(original_text, edited_text)
-    change_percent = (distance / max(1, len(original_text))) * 100
-    return distance, change_percent
-
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-st.title("Memsource Change % Calculator (Upload PE Only)")
-st.write("Select a project and job, then upload the Post-Edited (PE) XLIFF. The app will fetch the MT file automatically.")
-
-# Projects dropdown
-projects = list_projects()
-project_names = [name for (_, name) in projects]
-selected_project_name = st.selectbox("Choose a project", project_names)
-
-if selected_project_name:
-    project_id = [id for (id, name) in projects if name == selected_project_name][0]
-
-    # Jobs dropdown
-    jobs = list_jobs(project_id)
-    if not jobs:
-        st.warning("No jobs found in this project.")
+    if response.status_code == 200:
+        user = response.json()
+        st.success(f"✅ Connected to Memsource as: {user.get('userName')}")
+        return True
     else:
-        job_names = [name for (_, name) in jobs]
-        selected_job_name = st.selectbox("Choose a job", job_names)
+        st.error(f"❌ Connection failed: {response.status_code} - {response.text}")
+        return False
 
-        # Upload PE file
-        pe_file = st.file_uploader("Upload Post-Edited XLIFF", type=["xlf", "xliff", "mxliff"])
+# 📂 Function to extract text from XLIFF/mXLIFF
+def read_xliff(uploaded_file):
+    tree = ET.parse(uploaded_file)
+    root = tree.getroot()
+    ns = {'ns': 'urn:oasis:names:tc:xliff:document:1.2'}
+    segments = []
+    for trans_unit in root.findall('.//ns:trans-unit', ns):
+        source = trans_unit.find('ns:source', ns)
+        target = trans_unit.find('ns:target', ns)
+        if source is not None and target is not None:
+            segments.append((source.text or "", target.text or ""))
+    return segments
 
-        if selected_job_name and pe_file:
-            job_id = [id for (id, name) in jobs if name == selected_job_name][0]
+# 🧮 Function to calculate Levenshtein distance
+def levenshtein_distance(s1, s2):
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
 
-            # Download MT file
-            mt_bytes = download_mt_file_from_job(job_id)
-            if mt_bytes:
-                pe_bytes = pe_file.read()
-                mt_text = read_xliff_content(mt_bytes)
-                pe_text = read_xliff_content(pe_bytes)
+# 📊 Function to calculate change %
+def calculate_change(segments):
+    total_change = 0
+    total_length = 0
+    for source, target in segments:
+        distance = levenshtein_distance(source, target)
+        total_change += distance
+        total_length += len(source)
+    if total_length == 0:
+        return 0
+    return round((total_change / total_length) * 100, 2)
 
-                distance, change_percent = calculate_change_percent(mt_text, pe_text)
+# 🚀 Streamlit UI
+st.title("Memsource Change % Checker")
 
-                st.subheader("Results")
-                st.write(f"Levenshtein Distance: **{distance} edits**")
-                st.write(f"Change %: **{change_percent:.2f}%**")
+if st.button("🔗 Test API Connection"):
+    test_api_connection()
 
-                with st.expander("Show Extracted Texts"):
-                    st.text_area("MT Text", mt_text, height=200)
-                    st.text_area("PE Text", pe_text, height=200)
+st.write("---")
+
+uploaded_file = st.file_uploader("Upload PE XLIFF/mXLIFF file", type=["xliff", "mxliff"])
+
+if uploaded_file:
+    try:
+        segments = read_xliff(uploaded_file)
+        if not segments:
+            st.warning("No trans-units found in the file.")
+        else:
+            change_percent = calculate_change(segments)
+            st.success(f"Estimated Change %: {change_percent}%")
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
