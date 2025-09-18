@@ -1,14 +1,12 @@
 import streamlit as st
 import requests
-import os
 import xml.etree.ElementTree as ET
 
 # ------------------------------
-# Load API token
+# Config
 # ------------------------------
-API_TOKEN = st.secrets.get("MEMSOURCE_API_TOKEN", os.getenv("MEMSOURCE_API_TOKEN"))
-BASE_URL = "https://cloud.memsource.com/web/api2/v1"
-
+API_TOKEN = st.secrets.get("MEMSOURCE_API_TOKEN")
+BASE_URL = "https://cloud.memsource.com/web/api2"  # Legacy Memsource API
 
 # ------------------------------
 # Helpers
@@ -23,10 +21,10 @@ def get_headers():
 def list_projects(page_size=20):
     headers = get_headers()
     if not headers:
-        return None
+        return []
 
-    url = f"{BASE_URL}/projects?pageSize={page_size}"
-    response = requests.get(url, headers=headers)
+    url = f"{BASE_URL}/projects"
+    response = requests.get(url, headers=headers, params={"pageSize": page_size})
     response.raise_for_status()
     return response.json().get("content", [])
 
@@ -34,7 +32,7 @@ def list_projects(page_size=20):
 def list_jobs(project_uid):
     headers = get_headers()
     if not headers:
-        return None
+        return []
 
     url = f"{BASE_URL}/projects/{project_uid}/jobs"
     response = requests.get(url, headers=headers)
@@ -43,7 +41,6 @@ def list_jobs(project_uid):
 
 
 def levenshtein(a, b):
-    """Compute Levenshtein distance between two strings."""
     if len(a) < len(b):
         return levenshtein(b, a)
     if len(b) == 0:
@@ -62,7 +59,6 @@ def levenshtein(a, b):
 
 
 def calculate_change_percent(mt_texts, pe_texts):
-    """Compute average change % between MT and PE texts."""
     total_distance = 0
     total_length = 0
 
@@ -78,7 +74,6 @@ def calculate_change_percent(mt_texts, pe_texts):
 
 
 def parse_xliff(uploaded_file):
-    """Extract <source> and <target> segments from XLIFF/MXLIFF."""
     try:
         tree = ET.parse(uploaded_file)
         root = tree.getroot()
@@ -100,19 +95,18 @@ def parse_xliff(uploaded_file):
 # ------------------------------
 # Streamlit UI
 # ------------------------------
-st.title("Memsource (Phrase TMS) Change % App 🚀")
+st.title("Memsource (Legacy) Change % App 🚀")
 
 if API_TOKEN:
     st.success(f"✅ Token loaded (first 6 chars): {API_TOKEN[:6]}...")
 else:
     st.error("❌ No API token found. Please add MEMSOURCE_API_TOKEN in Streamlit secrets.")
 
-
 # Step 1: Select Project
 projects = []
 try:
     projects = list_projects()
-except Exception as e:
+except requests.exceptions.HTTPError as e:
     st.error(f"❌ Could not fetch projects: {e}")
 
 if projects:
