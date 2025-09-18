@@ -3,7 +3,7 @@ import requests
 import xml.etree.ElementTree as ET
 from io import BytesIO
 
-BASE_URL = "https://cloud.memsource.com/web/api2"
+BASE_URL = "https://cloud.memsource.com/web/api2/v1"
 API_TOKEN = st.secrets["memsource"]["api_token"]  # store your token in Streamlit secrets
 HEADERS = {"Authorization": f"ApiToken {API_TOKEN}"}
 
