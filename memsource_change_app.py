@@ -5,18 +5,18 @@ from io import BytesIO
 import xml.etree.ElementTree as ET
 import difflib
 
-st.title("📊 Memsource MT vs PE Change % Calculator")
+st.title("📊 Memsource MT vs PE Change % Calculator (Project2 API)")
 
 # Input
 username = st.text_input("Memsource Email / Username")
 password = st.text_input("Memsource Password", type="password")
 project_id = st.text_input("Project ID")
 
-BASE_URL = "https://cloud.memsource.com/web/api2/v1"
+BASE_URL = "https://cloud.memsource.com/api2"  # Project2 API base URL
 
 def login(username, password):
     """Log in and get Bearer token"""
-    url = f"{BASE_URL}/auth/login"
+    url = f"https://cloud.memsource.com/web/api2/v1/auth/login"
     payload = {"userName": username, "password": password}
     headers = {"Content-Type": "application/json"}
     response = requests.post(url, json=payload, headers=headers)
@@ -26,7 +26,7 @@ def login(username, password):
 
 def fetch_file(project_id, file_type, token):
     """
-    Fetch MT or PE XLIFF file from a Memsource project.
+    Fetch MT or PE XLIFF file from a Memsource Project2 project.
     file_type: "mt" or "pe"
     """
     headers = {"Authorization": f"Bearer {token}"}
@@ -41,8 +41,8 @@ def fetch_file(project_id, file_type, token):
         st.warning(f"No jobs found for project {project_id}")
         return None
     
-    # For simplicity, pick the first job
-    job_id = jobs[0]["id"]
+    # Pick the **latest job** (assuming sorted by creation date)
+    job_id = jobs[-1]["id"]
     
     # Step 2: Download target file
     target_url = f"{BASE_URL}/jobs/{job_id}/targetFile"
@@ -83,7 +83,7 @@ if st.button("Compute Change %"):
             token = login(username, password)
             st.success("🎉 Login successful!")
             
-            # Fetch MT and PE files
+            # Fetch latest MT and PE files
             mt_bytes = fetch_file(project_id, "mt", token)
             pe_bytes = fetch_file(project_id, "pe", token)
 
