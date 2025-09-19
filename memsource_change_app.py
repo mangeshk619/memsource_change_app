@@ -4,15 +4,16 @@ import zipfile
 from io import BytesIO
 import xml.etree.ElementTree as ET
 import difflib
+import re
 
-st.title("📊 Memsource MT vs PE Change % Calculator (Project2 API)")
+st.title("📊 Memsource MT vs PE Change % Calculator (Project2 URL → API)")
 
 # Input
 username = st.text_input("Memsource Email / Username")
 password = st.text_input("Memsource Password", type="password")
-project_id = st.text_input("Project ID")
+project_url_id = st.text_input("Project URL ID (the string in /show/...)")
 
-BASE_URL = "https://cloud.memsource.com/api2"  # Project2 API base URL
+BASE_URL = "https://cloud.memsource.com/api2"  # API base
 
 def login(username, password):
     """Log in and get Bearer token"""
@@ -24,27 +25,43 @@ def login(username, password):
     token = response.json().get("token")
     return token
 
-def fetch_file(project_id, file_type, token):
+def resolve_numeric_project_id(project_url_id, token):
     """
-    Fetch MT or PE XLIFF file from a Project2 Memsource project.
-    file_type: "mt" or "pe"
+    Resolve the numeric project ID from the external URL ID
+    """
+    headers = {"Authorization": f"Bearer {token}"}
+    projects_url = f"{BASE_URL}/projects?pageSize=500"
+    resp = requests.get(projects_url, headers=headers)
+    resp.raise_for_status()
+    projects = resp.json().get("content", [])
+    
+    for proj in projects:
+        # Match external URL ID
+        if proj.get("uid") == project_url_id:
+            return proj["id"]
+    st.warning(f"Could not find numeric project ID for {project_url_id}")
+    return None
+
+def fetch_file(numeric_project_id, file_type, token):
+    """
+    Fetch MT or PE XLIFF file from numeric project ID
     """
     headers = {"Authorization": f"Bearer {token}"}
     
-    # Step 1: Get all jobs for the project using Project2 API
-    jobs_url = f"{BASE_URL}/projects2/{project_id}/jobs"
+    # Get all jobs
+    jobs_url = f"{BASE_URL}/projects/{numeric_project_id}/jobs"
     jobs_resp = requests.get(jobs_url, headers=headers)
     jobs_resp.raise_for_status()
     jobs = jobs_resp.json().get("content", [])
     
     if not jobs:
-        st.warning(f"No jobs found for project {project_id}")
+        st.warning(f"No jobs found for project {numeric_project_id}")
         return None
     
-    # Pick the **latest job** (assumes last in list is most recent)
+    # Pick latest job
     job_id = jobs[-1]["id"]
     
-    # Step 2: Download target file
+    # Download target file
     target_url = f"{BASE_URL}/jobs/{job_id}/targetFile"
     params = {"type": "XLIFF", "version": file_type}
     target_resp = requests.get(target_url, headers=headers, params=params)
@@ -76,25 +93,30 @@ def levenshtein_ratio(s1, s2):
     return difflib.SequenceMatcher(None, s1, s2).ratio() * 100
 
 if st.button("Compute Change %"):
-    if not username or not password or not project_id:
+    if not username or not password or not project_url_id:
         st.error("Please fill in all fields.")
     else:
         try:
             token = login(username, password)
             st.success("🎉 Login successful!")
             
-            # Fetch latest MT and PE files
-            mt_bytes = fetch_file(project_id, "mt", token)
-            pe_bytes = fetch_file(project_id, "pe", token)
-
-            if mt_bytes and pe_bytes:
-                mt_text = read_xliff_text(mt_bytes)
-                pe_text = read_xliff_text(pe_bytes)
-
-                change_percent = 100 - levenshtein_ratio(mt_text, pe_text)
-                st.metric("Change % between MT and PE", f"{change_percent:.2f}%")
+            # Resolve numeric project ID
+            numeric_project_id = resolve_numeric_project_id(project_url_id, token)
+            if not numeric_project_id:
+                st.error("❌ Could not resolve project ID. Check URL ID.")
             else:
-                st.error("❌ Could not fetch MT or PE files. Check project ID and permissions.")
+                # Fetch MT and PE files
+                mt_bytes = fetch_file(numeric_project_id, "mt", token)
+                pe_bytes = fetch_file(numeric_project_id, "pe", token)
+
+                if mt_bytes and pe_bytes:
+                    mt_text = read_xliff_text(mt_bytes)
+                    pe_text = read_xliff_text(pe_bytes)
+
+                    change_percent = 100 - levenshtein_ratio(mt_text, pe_text)
+                    st.metric("Change % between MT and PE", f"{change_percent:.2f}%")
+                else:
+                    st.error("❌ Could not fetch MT or PE files. Check project permissions.")
 
         except requests.HTTPError as e:
             st.error(f"❌ HTTP Error: {e}")
