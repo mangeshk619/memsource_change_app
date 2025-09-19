@@ -26,13 +26,13 @@ def login(username, password):
 
 def fetch_file(project_id, file_type, token):
     """
-    Fetch MT or PE XLIFF file from a Memsource Project2 project.
+    Fetch MT or PE XLIFF file from a Project2 Memsource project.
     file_type: "mt" or "pe"
     """
     headers = {"Authorization": f"Bearer {token}"}
     
-    # Step 1: Get all jobs for the project
-    jobs_url = f"{BASE_URL}/projects/{project_id}/jobs"
+    # Step 1: Get all jobs for the project using Project2 API
+    jobs_url = f"{BASE_URL}/projects2/{project_id}/jobs"
     jobs_resp = requests.get(jobs_url, headers=headers)
     jobs_resp.raise_for_status()
     jobs = jobs_resp.json().get("content", [])
@@ -41,7 +41,7 @@ def fetch_file(project_id, file_type, token):
         st.warning(f"No jobs found for project {project_id}")
         return None
     
-    # Pick the **latest job** (assuming sorted by creation date)
+    # Pick the **latest job** (assumes last in list is most recent)
     job_id = jobs[-1]["id"]
     
     # Step 2: Download target file
