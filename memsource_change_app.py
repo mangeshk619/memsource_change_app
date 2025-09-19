@@ -11,8 +11,8 @@ if not API_TOKEN:
 else:
     st.success(f"✅ Token loaded (first 6 chars): {API_TOKEN[:6]}...")
 
-    BASE_URL = "https://cloud.memsource.com/web/api2/v1"  # or us.cloud.memsource.com if US tenant
-    url = f"{BASE_URL}/users/me"
+    BASE_URL = "https://cloud.memsource.com/web/api2/v1"
+    url = f"{BASE_URL}/users"
 
     headers = {"Authorization": f"ApiToken {API_TOKEN}"}
 
@@ -23,8 +23,8 @@ else:
         st.code(response.text[:500])  # show first 500 chars
 
         if response.ok:
-            st.success("🎉 Token is valid! API connection works.")
+            st.success("🎉 Token is valid! Users list retrieved.")
         else:
-            st.error(f"❌ Token test failed: {response.status_code}")
+            st.error(f"❌ Users test failed: {response.status_code}")
     except Exception as e:
         st.error(f"⚠️ Error: {e}")
