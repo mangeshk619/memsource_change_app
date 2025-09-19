@@ -5,13 +5,12 @@ from io import BytesIO
 import xml.etree.ElementTree as ET
 import difflib
 
-st.title("📊 Memsource MT vs PE Change % Calculator (Project2 Jobs)")
+st.title("📊 Memsource MT vs PE Change % Calculator (Project2)")
 
 # Inputs
 username = st.text_input("Memsource Email / Username")
 password = st.text_input("Memsource Password", type="password")
-mt_job_id = st.text_input("MT Job ID")
-pe_job_id = st.text_input("PE Job ID")
+project_id = st.text_input("Project ID (from URL or admin panel)")
 
 BASE_URL = "https://cloud.memsource.com/api2"
 
@@ -25,12 +24,20 @@ def login(username, password):
     token = response.json().get("token")
     return token
 
-def fetch_file(job_id, file_type, token):
-    """Fetch XLIFF file for a given job"""
+def list_jobs(project_id, token):
+    """List all jobs for a project"""
     headers = {"Authorization": f"Bearer {token}"}
-    target_url = f"{BASE_URL}/jobs/{job_id}/targetFile"
+    url = f"{BASE_URL}/projects/{project_id}/jobs"
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json().get("content", [])
+
+def fetch_file(job_id, file_type, token):
+    """Fetch XLIFF file for a job UID"""
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{BASE_URL}/jobs/{job_id}/targetFile"
     params = {"type": "XLIFF", "version": file_type}
-    response = requests.get(target_url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params)
     response.raise_for_status()
     return response.content
 
@@ -57,24 +64,41 @@ def levenshtein_ratio(s1, s2):
     return difflib.SequenceMatcher(None, s1, s2).ratio() * 100
 
 if st.button("Compute Change %"):
-    if not username or not password or not mt_job_id or not pe_job_id:
+    if not username or not password or not project_id:
         st.error("Please fill in all fields.")
     else:
         try:
             token = login(username, password)
             st.success("🎉 Login successful!")
             
-            # Fetch files
-            mt_bytes = fetch_file(mt_job_id, "mt", token)
-            pe_bytes = fetch_file(pe_job_id, "pe", token)
+            jobs = list_jobs(project_id, token)
+            if not jobs:
+                st.error("❌ No jobs found for this project.")
+            else:
+                # Identify MT and PE jobs
+                mt_job = None
+                pe_job = None
+                for job in jobs:
+                    stage = job.get("workflowStepName", "").lower()
+                    if "mt" in stage:
+                        mt_job = job["id"]
+                    elif "pe" in stage or "post-edit" in stage:
+                        pe_job = job["id"]
 
-            # Extract text
-            mt_text = read_xliff_text(mt_bytes)
-            pe_text = read_xliff_text(pe_bytes)
+                if not mt_job or not pe_job:
+                    st.error("❌ Could not identify MT or PE jobs automatically.")
+                else:
+                    # Fetch files
+                    mt_bytes = fetch_file(mt_job, "mt", token)
+                    pe_bytes = fetch_file(pe_job, "pe", token)
 
-            # Compute change %
-            change_percent = 100 - levenshtein_ratio(mt_text, pe_text)
-            st.metric("Change % between MT and PE", f"{change_percent:.2f}%")
+                    # Extract text
+                    mt_text = read_xliff_text(mt_bytes)
+                    pe_text = read_xliff_text(pe_bytes)
+
+                    # Compute change %
+                    change_percent = 100 - levenshtein_ratio(mt_text, pe_text)
+                    st.metric("Change % between MT and PE", f"{change_percent:.2f}%")
 
         except requests.HTTPError as e:
             st.error(f"❌ HTTP Error: {e}")
