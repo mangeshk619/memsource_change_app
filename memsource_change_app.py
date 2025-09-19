@@ -26,30 +26,49 @@ def login(username, password):
 
 def fetch_file(project_id, file_type, token):
     """
-    Fetch XLIFF file from Memsource project.
-    file_type: 'mt' or 'pe'
+    Fetch MT or PE XLIFF file from a Memsource project.
+    file_type: "mt" or "pe"
     """
-    # For simplicity, assuming a structure like:
-    # GET /projects/{projectId}/jobs -> get job IDs
-    # GET /jobs/{jobId}/targetFile?type=XLIFF&version={mt/pe}
-    # You might need to adjust endpoints depending on your tenant
-    # Here we will mock download
-    st.warning(f"⚠️ File fetching not implemented. This is where you would fetch {file_type} file for project {project_id}")
-    return None  # Replace with actual file bytes
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Step 1: Get all jobs for the project
+    jobs_url = f"{BASE_URL}/projects/{project_id}/jobs"
+    jobs_resp = requests.get(jobs_url, headers=headers)
+    jobs_resp.raise_for_status()
+    jobs = jobs_resp.json().get("content", [])
+    
+    if not jobs:
+        st.warning(f"No jobs found for project {project_id}")
+        return None
+    
+    # For simplicity, pick the first job
+    job_id = jobs[0]["id"]
+    
+    # Step 2: Download target file
+    target_url = f"{BASE_URL}/jobs/{job_id}/targetFile"
+    params = {"type": "XLIFF", "version": file_type}
+    target_resp = requests.get(target_url, headers=headers, params=params)
+    target_resp.raise_for_status()
+    
+    return target_resp.content
 
 def read_xliff_text(file_bytes):
     """Extract all target text from XLIFF"""
     text = ""
     if file_bytes:
-        with zipfile.ZipFile(BytesIO(file_bytes)) as z:
-            for name in z.namelist():
-                if name.endswith(".xlf") or name.endswith(".xliff"):
-                    with z.open(name) as f:
-                        tree = ET.parse(f)
-                        root = tree.getroot()
-                        for t in root.findall(".//{*}target"):
-                            if t.text:
-                                text += t.text + " "
+        try:
+            with zipfile.ZipFile(BytesIO(file_bytes)) as z:
+                for name in z.namelist():
+                    if name.endswith(".xlf") or name.endswith(".xliff"):
+                        with z.open(name) as f:
+                            tree = ET.parse(f)
+                            root = tree.getroot()
+                            for t in root.findall(".//{*}target"):
+                                if t.text:
+                                    text += t.text + " "
+        except zipfile.BadZipFile:
+            st.warning("File is not a zip/XLIFF file, attempting to read raw content")
+            text = file_bytes.decode("utf-8", errors="ignore")
     return text
 
 def levenshtein_ratio(s1, s2):
@@ -64,7 +83,7 @@ if st.button("Compute Change %"):
             token = login(username, password)
             st.success("🎉 Login successful!")
             
-            # Fetch files
+            # Fetch MT and PE files
             mt_bytes = fetch_file(project_id, "mt", token)
             pe_bytes = fetch_file(project_id, "pe", token)
 
@@ -75,7 +94,7 @@ if st.button("Compute Change %"):
                 change_percent = 100 - levenshtein_ratio(mt_text, pe_text)
                 st.metric("Change % between MT and PE", f"{change_percent:.2f}%")
             else:
-                st.warning("Files could not be fetched. Implement fetch_file() with your Memsource endpoints.")
+                st.error("❌ Could not fetch MT or PE files. Check project ID and permissions.")
 
         except requests.HTTPError as e:
             st.error(f"❌ HTTP Error: {e}")
