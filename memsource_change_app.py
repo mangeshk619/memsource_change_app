@@ -7,23 +7,33 @@ import difflib
 st.title("📊 MT vs PE Change % Calculator")
 
 def read_xliff_text(file_bytes):
-    """Extract all target text from XLIFF"""
+    """Extract all target text from XLIFF (zip or plain XML)"""
     text = ""
-    if file_bytes:
+    if not file_bytes:
+        return text
+    try:
+        # Try as zip
+        with zipfile.ZipFile(BytesIO(file_bytes)) as z:
+            for name in z.namelist():
+                if name.endswith(".xlf") or name.endswith(".xliff"):
+                    with z.open(name) as f:
+                        tree = ET.parse(f)
+                        root = tree.getroot()
+                        # Get all target text
+                        for t in root.findall(".//{*}target"):
+                            if t.text:
+                                text += t.text + " "
+    except zipfile.BadZipFile:
+        # Not a zip, treat as plain XML
         try:
-            with zipfile.ZipFile(BytesIO(file_bytes)) as z:
-                for name in z.namelist():
-                    if name.endswith(".xlf") or name.endswith(".xliff"):
-                        with z.open(name) as f:
-                            tree = ET.parse(f)
-                            root = tree.getroot()
-                            for t in root.findall(".//{*}target"):
-                                if t.text:
-                                    text += t.text + " "
-        except zipfile.BadZipFile:
-            # If it's not a zip, treat as plain text
+            root = ET.fromstring(file_bytes)
+            for t in root.findall(".//{*}target"):
+                if t.text:
+                    text += t.text + " "
+        except ET.ParseError:
+            # fallback: decode all text
             text = file_bytes.decode("utf-8", errors="ignore")
-    return text
+    return text.strip()
 
 def levenshtein_ratio(s1, s2):
     """Compute similarity ratio"""
@@ -46,7 +56,14 @@ if st.button("Compute Change %"):
             mt_text = read_xliff_text(mt_bytes)
             pe_text = read_xliff_text(pe_bytes)
 
-            change_percent = 100 - levenshtein_ratio(mt_text, pe_text)
-            st.success(f"✅ Change % between MT and PE: {change_percent:.2f}%")
+            # Debug info
+            st.write("MT text length:", len(mt_text))
+            st.write("PE text length:", len(pe_text))
+
+            if not mt_text or not pe_text:
+                st.warning("One of the files has no target text. Check the file contents.")
+            else:
+                change_percent = 100 - levenshtein_ratio(mt_text, pe_text)
+                st.success(f"✅ Change % between MT and PE: {change_percent:.2f}%")
         except Exception as ex:
             st.error(f"⚠️ Error: {ex}")
